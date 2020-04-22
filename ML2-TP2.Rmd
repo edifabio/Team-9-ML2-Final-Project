@@ -20,7 +20,7 @@ output:
 ### Data Preprocessing
 
 
-```{r eval=FALSE, include=FALSE}
+```{r eval=FALSE, include=TRUE}
 original_train <- read.csv(file="train.csv",sep=",",header=T)
 original_test <- read.csv(file="test.csv",sep=",",header=T)
 
