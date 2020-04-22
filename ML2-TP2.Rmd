@@ -1,0 +1,416 @@
+---
+title: "ML2-TP2"
+author: "Team 9 - Erin DiFabio, Chris Farrell, Kris Hooper, Jared Shawver"
+output:
+  word_document: default
+  html_document: default
+  pdf_document: default
+---
+
+## The Facebook Competition
+  The competition we decided to pick on Kaggle has to do with Facebook. Before the competition ended, the leaders of this competition would be presented with the opportunity to interview for a software engineer job at Facebook. The goal of the competition is to predict which place a person would like to check into on Facebook. Facebook has a feature where no matter where you are, you can check in on Facebook and it allows your friends to know where you are on that day. Usually this feature is used if a user is either vacationing or going to a popular place. The data given to us was given in 3 excel files, the first being a sample submission, second the test data and lastly the train data. The train data consists of 6 columns whereas the test data consist of 5 columns. The data is a huge dataset consisting of over 104,000 instances. The key features in the data are row ID, x coordinate, y coordinate, accuracy and time. The response variable, found only in the train data, is place ID. This data was artificially created by Facebook consisting of more than 100,000 places. Facebook also ran us no favors by making the data messy to see how we would address these problems. This challenge is an unsupervised machine learning problem. 
+  
+## Reproducibility
+  Reproducibility is important because it allows methods and results to be verified. Creating a model that is not reproducible is almost pointless because if something is not working properly or leads to complications in the future, how is it possible to figure out what exactly went wrong? Therefore, by checking through the machine learning reproducibility checklist provided, we built a model that is in fact reproducible. Providing clear documentation on how and why we sampled from the original dataset the way we did, showing how we split our train and test sets along with the respective code, and setting a seed, are just a few ways in which we make it possible for our results to be reproduced. Explaining our thought process and justifying our reasoning and any assumptions that we made, allows for another to follow along with a deep understanding of the task at hand and why we chose to model the way we did, including the various techniques that we utilized. It is not enough to simply build a model and find the solution; the methods, techniques, and results of the work must be reproducible in order to be validated. 
+
+  For our analysis, we chose to use multiple algorithms and compare the outcomes in order to choose our best model. First, we begin by clearing the workspace and loading any necessary pacakages. 
+  
+  We have chosen to set the seed at 6 for reproduceability and we import our train and test dataset. It is important to point out that the train and test datasets have been significantly reduced from the initial 10km by 10km square. In order to even run our models we needed to reduce the dataset down to a 250m by 250m square. All models are utilizing the same data. The Y variable, place_id, is also converted to a factor.
+
+### Data Preprocessing
+
+
+```{r eval=FALSE, include=FALSE}
+original_train <- read.csv(file="train.csv",sep=",",header=T)
+original_test <- read.csv(file="test.csv",sep=",",header=T)
+
+# reduce range of data to 1 x 1 kilometer square 
+original_train.df <- data.frame(original_train)
+small_train <- subset.data.frame(original_train.df,original_train.df$x>1)
+small_train <- subset.data.frame(small_train,small_train$x<1.5)
+small_train <- subset.data.frame(small_train,small_train$y<2.5)
+small_train <- subset.data.frame(small_train,small_train$y>2)
+
+original_test.df <- data.frame(original_test)
+small_test <- subset.data.frame(original_test.df,original_test.df$x>1)
+small_test <- subset.data.frame(small_test,small_test$x<1.5)
+small_test <- subset.data.frame(small_test,small_test$y<2.5)
+small_test <- subset.data.frame(small_test,small_test$y>2)
+
+# working with time
+hours_in_day <- 24
+minutes_in_day <- hours_in_day * 60
+
+small_train$hour <- (small_train$time/60) %% hours_in_day
+small_train$DayOfWeek <- floor((small_train$time/(minutes_in_day)) %% 7) + 1
+
+small_test$hour <- (small_test$time/60) %% hours_in_day
+small_test$DayOfWeek <- floor((small_test$time/(minutes_in_day)) %% 7) + 1
+
+# reorder data
+small_train <- small_train[,c(1,2,3,4,5,7,8,6)]
+
+# create validation set 
+rows <- nrow(small_train)
+train.indices <- sample(rows, .8 * rows)
+train <- small_train[train.indices,]
+val <- small_train[-train.indices,]
+test <- small_test
+
+# remove redunant information
+drops <- c("row_id","time")
+train <- small_train[,!(names(small_train) %in% drops)]
+val <- val[,!(names(val) %in% drops)]
+test <- small_test[,!(names(test) %in% drops)]
+
+# convert to factors 
+train$place_id <- as.factor(train$place_id)
+val$place_id <- as.factor(val$place_id)
+
+# export 
+write.csv(train,"train_small.csv",row.names = F)
+write.csv(val,"val_small.csv",row.names = F)
+write.csv(test,"test_small.csv",row.names = F)
+```
+
+
+
+```{r}
+rm(list=ls())
+
+installIfAbsentAndLoad <- function(neededVector) {
+  for(thispackage in neededVector) {
+    if( ! require(thispackage, character.only = T) )
+    { install.packages(thispackage)}
+    require(thispackage, character.only = T)
+  }
+}
+
+needed <- c('e1071', 'randomForest', 'class')  
+installIfAbsentAndLoad(needed)
+
+set.seed(6)
+
+train <- data.frame(read.csv("train_small.csv",header = T))
+test <- data.frame(read.csv("test_small.csv",header = T))
+
+train$place_id <- as.factor(train$place_id)
+```
+
+
+## Model 1 -- Support Vector Machine
+  SVM requires an incredibly high number of computations to run. Because of this the datasets must be shrunk or else the following error is returned: Error: cannot allocate vector of size xxx GB.
+
+```{r}
+rows <- nrow(train)
+shrink.indices <- sample(rows, .02 * rows)
+train <- train[shrink.indices,]
+
+rows <- nrow(test)
+shrink.indices <- sample(rows, .02 * rows)
+test <- test[shrink.indices,]
+
+rows <- nrow(train)
+train.indices <- sample(rows, .8 * rows)
+train <- train[train.indices,]
+val <- train[-train.indices,]
+```
+
+### Test SVM -- full radial kernel
+
+```{r}
+svm.rad <- svm(place_id~.,data=train,kernel="radial",cost=1,gamma=1,scale=T)
+
+# make predictions 
+ypred.rad <- predict(svm.rad,val[,1:5])
+
+# determine accuracy
+acc.rad <- mean(ifelse(val$place_id==ypred.rad,1,0))
+```
+
+### A more flexible SVM
+
+```{r}
+svm.rad.flex <- svm(place_id~.,data=train,kernel="radial",cost=1,gamma=5,scale=T)
+
+# make predictions 
+ypred.rad.flex <- predict(svm.rad.flex,val[,1:5])
+
+# determine accuracy
+acc.rad.flex <- mean(ifelse(val$place_id==ypred.rad.flex,1,0))
+```
+
+
+### An SVM with less training errors
+
+```{r}
+svm.rad.lcost <- svm(place_id~x + y,data=train,kernel="radial",cost=.01,gamma=5,scale=T)
+
+# make predictions 
+ypred.rad.lcost <- predict(svm.rad.lcost,val[,1:5])
+
+# determine accuracy
+acc.rad.lcost <- mean(ifelse(val$place_id==ypred.rad.lcost,1,0))
+```
+
+
+### An SVM with increased training errors
+
+```{r}
+svm.rad.hcost <- svm(place_id~x + y,data=train,kernel="radial",cost=10,gamma=5,scale=T)
+
+# make predictions 
+ypred.rad.hcost <- predict(svm.rad.hcost,val[,1:5])
+
+# determine accuracy
+acc.rad.hcost <- mean(ifelse(val$place_id==ypred.rad.hcost,1,0))
+```
+
+###Best SVM model
+
+```{r}
+results.df <- data.frame("model"=c("Regular Radial",
+                                   "More Flexible, Gamma = 5",
+                                   "Low Cost, cost = .01",
+                                   "High Cost, cost = 10"),
+                         "error rate"=c(1-acc.rad,
+                                        1-acc.rad.flex,
+                                        1-acc.rad.lcost,
+                                        1-acc.rad.hcost))
+
+print(results.df)
+```
+
+#### The best model is the more flexible model with gamma = .5 and error rate of approximately 6%.
+
+### Best Model Predictions
+
+```{r}
+ypred.best <- predict(svm.rad.flex,test)
+pred.df <- test
+pred.df[,6] <- ypred.best
+
+# store the results 
+names(pred.df)[6] <- "svm_pred_place_id"
+```
+
+
+## Model 2 -- K-Nearest Neighbors
+  We begin our KNN model in a similar fashion as the SVM model by resetting the seed to 6 and setting up the same train, test, and validate datasets. 
+
+```{r}
+set.seed(6)
+
+rows <- nrow(train)
+shrink.indices <- sample(rows, .02 * rows)
+train <- train[shrink.indices,]
+
+rows <- nrow(train)
+train.indices <- sample(rows, .8 * rows)
+train <- train[train.indices,]
+validate <- train[-train.indices,]
+
+rows <- nrow(test)
+shrink.indices <- sample(rows, .02 * rows)
+test <- test[shrink.indices,]
+
+
+train$place_id <- as.factor(train$place_id)
+validate$place_id <- as.factor(validate$place_id)
+
+# create train, validate and test set
+train.x <- cbind(train$x, train$y, train$accuracy, train$hour, train$DayOfWeek)
+train.y <- train$place_id
+validate.x <- cbind(validate$x, validate$y, validate$accuracy, validate$hour, validate$DayOfWeek)
+validate.y <- validate$place_id
+test.x <- cbind(test$x, test$accuracy, test$hour, test$DayOfWeek)
+```
+
+```{r}
+
+error = c(1:20)
+for (k in 1:20) {
+  knn.pred <- knn(train.x, validate.x, train.y, k=k)
+  error[k] <- mean(knn.pred != validate.y)
+}
+plot(c(1:20),error)
+
+```
+  
+### K = 1 
+
+```{r}
+knn.pred.k1 <- knn(train.x, validate.x, train.y, k=1)
+df <- cbind.data.frame(knn.pred.k1,validate.y)
+
+size <- nrow(df)
+hold <- rep(0,size)
+for (i in 1:size) {
+  if (df[i,1]==df[i,2]) {hold[i]=1} else {hold[i]=0}
+} # If the values are the same then store a one else store a zero. 
+  # The mean of these will be accuracy.
+
+(acc.k1 <- mean(hold))  
+(err.k1 <- 1 - acc.k1)
+```
+
+
+### K = 3 
+
+```{r}
+knn.pred <- knn(train.x, validate.x, train.y, k=3)
+df <- cbind.data.frame(knn.pred,validate.y)
+
+size <- nrow(df)
+hold <- rep(0,size)
+for (i in 1:size) {
+  if (df[i,1]==df[i,2]) {hold[i]=1} else {hold[i]=0}
+} # If the values are the same then store a one else store a zero. 
+  # The mean of these will be accuracy.
+
+(acc.k3 <- mean(hold))
+(err.k3 <- 1 - acc.k3)
+```
+
+
+
+### K = 5 
+
+```{r}
+knn.pred <- knn(train.x, validate.x, train.y, k=5)
+df <- cbind.data.frame(knn.pred,validate.y)
+
+size <- nrow(df)
+hold <- rep(0,size)
+for (i in 1:size) {
+  if (df[i,1]==df[i,2]) {hold[i]=1} else {hold[i]=0}
+} # If the values are the same then store a one else store a zero. 
+  # The mean of these will be accuracy.
+
+(acc.k5 <- mean(hold))
+(err.k5 <- 1 - acc.k5)
+```
+
+
+### K = 10 
+
+```{r}
+knn.pred <- knn(train.x, validate.x, train.y, k=10)
+df <- cbind.data.frame(knn.pred,validate.y)
+
+size <- nrow(df)
+hold <- rep(0,size)
+for (i in 1:size) {
+  if (df[i,1]==df[i,2]) {hold[i]=1} else {hold[i]=0}
+} # If the values are the same then store a one else store a zero. 
+  # The mean of these will be accuracy.
+
+(acc.k10 <- mean(hold)) 
+(err.k10 <- 1 - acc.k10)
+```
+
+
+### Best KNN model
+
+
+```{r}
+resultsknn.df <- data.frame("model"=c("K = 1",
+                                   "K = 3",
+                                   "K = 5",
+                                   "K = 10"),
+                         "error rate"=c(err.k1,
+                                        err.k3,
+                                        err.k5,
+                                        err.k10))
+
+print(resultsknn.df)
+
+
+
+pred.df[,7] <- knn.pred.k1
+
+# store the results 
+names(pred.df)[7] <- "knn_pred_place_id"
+```
+
+
+## Model 2 -- Random Forest
+  We continue the trend with our Random Forest model by first resetting the random seed to 6 and making sure that the data is in test, train, and validate datasets. 
+  
+```{r}
+set.seed(6)
+
+train <- data.frame(read.csv("train_small.csv",header = T))
+test <- data.frame(read.csv("test_small.csv",header = T))
+
+rows <- nrow(train)
+shrink.indices <- sample(rows, .02 * rows)
+train <- train[shrink.indices,]
+
+rows <- nrow(test)
+shrink.indices <- sample(rows, .02 * rows)
+test <- test[shrink.indices,]
+
+rows <- nrow(train)
+train.indices <- sample(rows, .8 * rows)
+train <- train[train.indices,]
+val <- train[-train.indices,]
+
+train$place_id <- as.factor(train$place_id)
+```
+
+
+### Random Forest Model
+
+```{r}
+# random forest
+RF = randomForest(place_id~., data=train, ntree=500,mtry=4, importance=TRUE, replace=TRUE)
+#RF
+
+# predict on test sed
+RF.yhat = predict(RF, newdata=val)
+
+
+```
+
+```{r}
+# variable importance
+varImpPlot(RF)
+
+df <- cbind.data.frame(RF.yhat,val$place_id)
+
+size <- nrow(df)
+hold <- rep(0,size)
+for (i in 1:size) {
+  if (df[i,1]==df[i,2]) {hold[i]=1} else {hold[i]=0}
+} # If the values are the same then store a one else store a zero. 
+  # The mean of these will be accuracy.
+
+(acc.rf <- mean(hold)) 
+(err.rf <- 1 - acc.rf)
+```
+
+### Best RF model
+
+```{r}
+resultsrf.df <- data.frame("model"=c("Random Forest"),
+                         "error rate"=c(err.rf))
+
+print(resultsrf.df)
+```
+
+### Compilation of our best models compared and executed on the same data
+
+
+```{r}
+RF.yhat = predict(RF, test)
+
+pred.df[,8] <- RF.yhat
+# store the results 
+names(pred.df)[8] <- "rf_pred_place_id"
+
+head(pred.df,10)
+```
+
+
+
